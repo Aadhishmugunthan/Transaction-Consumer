@@ -21,7 +21,7 @@ public class MappingService {
     }
 
     /**
-     * Extract value from JSON using externalized mapping
+     * Extract a single value according to mapping rule
      */
     public Object extractValue(String json, FieldMapping mapping) {
         if (mapping == null) {
@@ -41,37 +41,25 @@ public class MappingService {
     }
 
     /**
-     * Extract value from JSON with error handling
+     * Extract JSON path with validation + default handling
      */
     private Object extractFromJson(String json, FieldMapping mapping) {
         try {
             Object value = JsonPath.read(json, mapping.getPath());
 
-            if (value == null && mapping.getRequired() != null && mapping.getRequired()) {
-                if (mapping.getDefaultValue() != null) {
-                    return mapping.getDefaultValue();
-                }
-                throw new IllegalArgumentException(
-                        "Required field missing: " + mapping.getPath()
-                );
-            }
-
-            // Validate value
             validateValue(value, mapping);
-
             return value;
+
         } catch (PathNotFoundException e) {
-            if (mapping.getRequired() != null && mapping.getRequired()) {
-                throw new IllegalArgumentException(
-                        "Required field not found: " + mapping.getPath(), e
-                );
+            if (Boolean.TRUE.equals(mapping.getRequired())) {
+                throw new IllegalArgumentException("Missing required field: " + mapping.getPath());
             }
             return mapping.getDefaultValue();
         }
     }
 
     /**
-     * Validate extracted value against rules
+     * Validate field value based on provided rules
      */
     private void validateValue(Object value, FieldMapping mapping) {
         if (value == null || mapping.getValidation() == null) {
@@ -80,136 +68,74 @@ public class MappingService {
 
         ValidationRules rules = mapping.getValidation();
 
-        // Check allowed values (enum validation)
-        if (rules.getAllowed() != null && !rules.getAllowed().isEmpty()) {
-            if (!rules.getAllowed().contains(value.toString())) {
-                throw new IllegalArgumentException(
-                        "Value '" + value + "' not in allowed list: " + rules.getAllowed()
-                );
-            }
+        // allowed values
+        if (rules.getAllowed() != null && !rules.getAllowed().contains(value.toString())) {
+            throw new IllegalArgumentException("Value not allowed: " + value);
         }
 
-        // Check pattern (regex)
-        if (rules.getPattern() != null) {
-            if (!value.toString().matches(rules.getPattern())) {
-                throw new IllegalArgumentException(
-                        "Value '" + value + "' does not match pattern: " + rules.getPattern()
-                );
-            }
+        // regex pattern
+        if (rules.getPattern() != null && !value.toString().matches(rules.getPattern())) {
+            throw new IllegalArgumentException("Invalid format: " + value);
         }
 
-        // Check max length
-        if (rules.getMaxLength() != null) {
-            if (value.toString().length() > rules.getMaxLength()) {
-                throw new IllegalArgumentException(
-                        "Value exceeds max length of " + rules.getMaxLength()
-                );
-            }
+        // max length
+        if (rules.getMaxLength() != null && value.toString().length() > rules.getMaxLength()) {
+            throw new IllegalArgumentException("Value too long: " + value);
         }
 
-        // Check numeric range
+        // numeric validations
         if (value instanceof Number) {
-            int numValue = ((Number) value).intValue();
-
-            if (rules.getMin() != null && numValue < rules.getMin()) {
-                throw new IllegalArgumentException(
-                        "Value " + numValue + " is less than minimum " + rules.getMin()
-                );
+            int num = ((Number) value).intValue();
+            if (rules.getMin() != null && num < rules.getMin()) {
+                throw new IllegalArgumentException("Value less than minimum");
             }
-
-            if (rules.getMax() != null && numValue > rules.getMax()) {
-                throw new IllegalArgumentException(
-                        "Value " + numValue + " exceeds maximum " + rules.getMax()
-                );
+            if (rules.getMax() != null && num > rules.getMax()) {
+                throw new IllegalArgumentException("Value more than maximum");
             }
         }
     }
 
     /**
-     * Get all sender party field mappings - FIXED
-     */
-    public Map<String, FieldMapping> getSenderPartyMappings() {
-        if (mappingConfig.getSender() == null || mappingConfig.getSender().getParty() == null) {
-            return new HashMap<>();
-        }
-        return mappingConfig.getSender().getParty();
-    }
-
-    /**
-     * Get all sender address mappings - FIXED
-     */
-    public Map<String, FieldMapping> getSenderAddressMappings() {
-        if (mappingConfig.getSender() == null || mappingConfig.getSender().getAddress() == null) {
-            return new HashMap<>();
-        }
-        return mappingConfig.getSender().getAddress();
-    }
-
-    /**
-     * Get all recipient party mappings - FIXED
-     */
-    public Map<String, FieldMapping> getRecipientPartyMappings() {
-        if (mappingConfig.getRecipient() == null || mappingConfig.getRecipient().getParty() == null) {
-            return new HashMap<>();
-        }
-        return mappingConfig.getRecipient().getParty();
-    }
-
-    /**
-     * Get all recipient address mappings - FIXED
-     */
-    public Map<String, FieldMapping> getRecipientAddressMappings() {
-        if (mappingConfig.getRecipient() == null || mappingConfig.getRecipient().getAddress() == null) {
-            return new HashMap<>();
-        }
-        return mappingConfig.getRecipient().getAddress();
-    }
-
-    /**
-     * Get transaction mappings - NEW
-     */
-    public Map<String, FieldMapping> getTransactionMappings() {
-        if (mappingConfig.getPayment() == null || mappingConfig.getPayment().getTransaction() == null) {
-            return new HashMap<>();
-        }
-        return mappingConfig.getPayment().getTransaction();
-    }
-
-    /**
-     * Get transaction detail mappings - NEW
-     */
-    public Map<String, FieldMapping> getTransactionDetailMappings() {
-        if (mappingConfig.getTransactionDetail() == null || mappingConfig.getTransactionDetail().getDetail() == null) {
-            return new HashMap<>();
-        }
-        return mappingConfig.getTransactionDetail().getDetail();
-    }
-
-    /**
-     * Extract all values for a given entity type
+     * Extract all values for a given mapping
      */
     public Map<String, Object> extractAllValues(String json, Map<String, FieldMapping> mappings) {
         Map<String, Object> result = new HashMap<>();
 
-        if (mappings == null || mappings.isEmpty()) {
-            return result;
-        }
+        if (mappings == null) return result;
 
         for (Map.Entry<String, FieldMapping> entry : mappings.entrySet()) {
-            String fieldName = entry.getKey();
-            FieldMapping mapping = entry.getValue();
-
             try {
-                Object value = extractValue(json, mapping);
+                Object value = extractValue(json, entry.getValue());
                 if (value != null) {
-                    result.put(fieldName, value);
+                    result.put(entry.getKey(), value);
                 }
-            } catch (Exception e) {
-                // Log error but continue processing other fields
-                System.err.println("Error extracting field " + fieldName + ": " + e.getMessage());
+            } catch (Exception ex) {
+                System.err.println("Mapping failed for " + entry.getKey() + ": " + ex.getMessage());
             }
         }
-
         return result;
+    }
+
+    // =========================================================
+    //           MAPPINGS FETCH METHODS (CODE YOU ASKED)
+    // =========================================================
+
+    public Map<String, FieldMapping> getSenderPartyMappings() {
+        return mappingConfig.getSender().getParty();
+    }
+
+    public Map<String, FieldMapping> getRecipientPartyMappings() {
+        return mappingConfig.getRecipient().getParty();
+    }
+
+    // ⭐ NEW METHODS EXACTLY FOR BOSS REQUIREMENT ⭐
+    public Map<String, FieldMapping> getSenderAddressMappings() {
+        return mappingConfig.getAddress()
+                .getOrDefault("sender", new HashMap<>());
+    }
+
+    public Map<String, FieldMapping> getRecipientAddressMappings() {
+        return mappingConfig.getAddress()
+                .getOrDefault("recipient", new HashMap<>());
     }
 }
