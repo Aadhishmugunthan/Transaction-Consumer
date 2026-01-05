@@ -1,10 +1,13 @@
 package com.example.TransactionConsumer.controller;
 
 import com.example.TransactionConsumer.service.TransactionService;
-import com.example.TransactionConsumer.dto.ErrorResponse;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-import java.util.HashMap;
+
 import java.util.Map;
 
 @RestController
@@ -12,20 +15,22 @@ import java.util.Map;
 public class TransactionController {
 
     private final TransactionService service;
+    private final ObjectMapper objectMapper;
 
-    public TransactionController(TransactionService service) {
+    public TransactionController(TransactionService service, ObjectMapper objectMapper) {
         this.service = service;
+        this.objectMapper = objectMapper;
     }
 
-    @PostMapping
-    public ResponseEntity<?> create(@RequestBody String payload) {
-        try {
-            service.processTransaction(payload);
-            return ResponseEntity.status(201).body("Transaction Created Successfully");
-        } catch (ErrorResponse ex) {
-            Map<String, String> error = new HashMap<>();
-            error.put("error", ex.getReason());
-            return ResponseEntity.badRequest().body(error);
-        }
+    @PostMapping(consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<String> create(@RequestBody Map<String, Object> payload)
+            throws JsonProcessingException {
+
+        String json = objectMapper.writeValueAsString(payload);
+        service.processTransaction(json);
+
+        return ResponseEntity
+                .status(HttpStatus.CREATED)
+                .body("Transaction Created Successfully");
     }
 }
